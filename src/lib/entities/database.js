@@ -2,17 +2,17 @@
 
 const MongoDb = require('mongodb').Db;
 const MongoServer = require('mongodb').Server;
+const Promise = require('bluebird');
+const _ = require('underscore');
 
 const Collection = require('lib/entities/collection');
 const errors = require('lib/errors');
+const mongoUtils = require('src/lib/utils/mongoUtils');
 
-/**
- * @class Database
- */
+/** @class */
 class Database {
+  /** @constructor */
   /**
-   * @constructor Database
-   *
    * @param {Object} options
    * @param {String} options.name - name of the database
    * @param {String} options.host - host of the database, defaults to localhost
@@ -24,113 +24,124 @@ class Database {
   constructor(options) {
     options = options || {};
 
-    var _this = this;
-    _this.id = options.id;
-    _this.name = options.name || 'test'; //TODO: validate name doesn't contain spaces
-    _this.host = options.host || 'localhost';
-    _this.port = options.port || 27017;
-    _this.auth = options.auth || null;
-    _this.connection = options.connection;
+    this.id = options.id;
+    this.name = options.name; //TODO: validate name doesn't contain spaces
+    this.host = options.host;
+    this.port = options.port;
+    this.auth = options.auth;
+    this.connection = options.connection;
 
-    _this.isOpen = false;
+    this.collections = [];
 
-    _this.collections = [];
-
-    _this._dbConnection = new MongoDb(_this.name, new MongoServer(_this.host, _this.port));
+    if (mongoUtils.isLocalHost(this.host)) {
+      this._dbConnection = new MongoDb(this.name, new MongoServer(this.host, this.port));
+    } else {
+      this._dbConnection = null; //this is set by the parent connection once we've connect to it
+    }
   }
 
+  /** @method */
   /**
-   * @method open
-   * @param {Function} next - callback function
+   * @return Promise
    */
-  open(next) {
-    var _this = this;
+  open() {
+    return new Promise((resolve, reject) => {
+      //TODO: need to do some research and see if connecting to a database
+      //over and over like this is a performance issue or causes memory leaks
+      if (mongoUtils.isLocalHost(this.host)) {
+        this._dbConnection.open((err) => {
+          if (err) return reject(new errors.DatabaseError(err.message));
 
-    _this._dbConnection.open(function(err) {
-      if (err) return next(new errors.DatabaseError(err));
-
-      if (_this.auth) {
-        _this._dbConnection.authenticate(_this.auth.username, _this.auth.password, function(err) {
-          if (err) return next(new errors.DatabaseError(err));
-
-          return next(null);
+          return resolve(null);
         });
       } else {
-        return next(null);
+        this.connection.connect()
+          .then((database) => {
+            if (!database) {
+              return reject(new Error('error connecting to database'));
+            } else {
+              this._dbConnection = database;
+            }
+            return resolve(null);
+          })
+          .catch((err) => {
+            if (err) return reject(new errors.DatabaseError(err.message));
+          });
       }
     });
   }
 
+  /** @method */
   /**
-   * @method listCollections
-   * @param {Function} next - callback function
+   * @return Promise
    */
-  listCollections(next) {
-    var _this = this;
+  listCollections() {
+    return new Promise((resolve, reject) => {
+      if (!this._dbConnection) return reject(new Error('database - listCollections() - database is not connected yet'));
 
-    if (!_this.open) return next(new Error('Database is not open'));
+      if (this.collections && this.collections.length) {
+        return resolve(this.collections);
+      }
 
-    if (_this.collections && _this.collections.length) {
-      return next(null, _this.collections);
-    }
+      this._dbConnection.collections((err, collections) => {
+        if (err) return reject(new errors.DatabaseError(err.message));
 
-    _this._dbConnection.collections(function(err, collections) {
-      if (err) return next(new errors.DatabaseError(err));
-
-      _.each(collections, function(collection) {
-        _this.addCollection({
-          name: collection.collectionName
+        _.each(collections, (collection) => {
+          this.addCollection({
+            name: collection.collectionName
+          });
         });
-      });
 
-      return next(null, _this.collections);
+        return resolve(this.collections);
+      });
     });
   }
 
+  /** @method */
   /**
-   * @method addCollection
-   * @param {Object} options
+   * @return Promise
    */
   addCollection(options) {
-    options = options || {};
+    return new Promise((resolve, reject) => {
+      if (!options) return reject(new Error('database - addCollection() - options is required'));
+      if (!options.name) return reject(new Error('database - addCollection() - options.name is required'));
 
-    var _this = this;
+      if (!this._dbConnection) return reject(new Error('database - addCollection() - database is not connected yet'));
 
-    var existingCollection = _.findWhere(_this.collections, {
-      name: options.name
+      let existingCollection = _.findWhere(this.collections, {
+        name: options.name
+      });
+
+      if (existingCollection) return reject(new Error(`database -addCollection() - the collection name ${options.name} is already used`));
+
+      options.serverName = `${this.host}:${this.port}`;
+      options.databaseName = this.name;
+      options.connection = this.connection;
+      options.database = this;
+
+      this._dbConnection.createCollection(options.name, (err) => {
+        if (err) return reject(err);
+
+        let collection = new Collection(this._dbConnection, options);
+
+        this.collections.push(collection);
+
+        return resolve(collection);
+      });
     });
-
-    if (existingCollection) return;
-
-    options.serverName = _this.host + ':' + _this.port;
-    options.databaseName = _this.name;
-    options.connection = _this.connection;
-    options.database = _this;
-
-    var collection = new Collection(_this._dbConnection, options);
-
-    _this.collections.push(collection);
-
-    return collection;
   }
 
   /**
-   * @method drop
+   * Drop the database
    */
   drop() {
-    var _this = this;
-
-    return new Promise(function(resolve, reject) {
-      _this._dbConnection.dropDatabase(function(err) {
+    return new Promise((resolve, reject) => {
+      this._dbConnection.dropDatabase(err => {
         if (err) return reject(err);
         return resolve();
       });
     });
   }
-
 }
 
-/**
- * @exports
- */
 module.exports = Database;

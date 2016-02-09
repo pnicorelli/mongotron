@@ -3,10 +3,11 @@
 angular.module('app').controller('listConnectionsCtrl', [
   '$scope',
   '$timeout',
-  '$log',
   'connectionCache',
-  function($scope, $timeout, $log, connectionCache) {
+  'notificationService',
+  function($scope, $timeout, connectionCache, notificationService) {
     const connectionModule = require('lib/modules/connection');
+    const logger = require('lib/modules/logger');
 
     $scope.connections = [];
 
@@ -45,6 +46,17 @@ angular.module('app').controller('listConnectionsCtrl', [
       connection.selected = true;
     };
 
+    $scope.copyConnection = function(connection, $event) {
+      if (!connection) return false;
+      if ($event) $event.preventDefault();
+
+      let newConnection = _.clone(connection);
+      delete newConnection.id;
+      newConnection.name += ' copy';
+
+      $scope.changePage('add', newConnection);
+    };
+
     $scope.connectionSelected = function() {
       return _.any($scope.connections, (conn) => {
         return conn.selected;
@@ -60,9 +72,36 @@ angular.module('app').controller('listConnectionsCtrl', [
 
       if (!activeConnection) return;
 
-      connectionCache.add(activeConnection);
+      activeConnection.connecting = true;
 
-      $scope.close();
+      let startTime = performance.now();
+
+      activeConnection.connect()
+        .then(() => {
+          var ellapsed = (performance.now() - startTime).toFixed(5);
+
+          $timeout(() => {
+            connectionCache.add(activeConnection);
+
+            $scope.close();
+          }, (ellapsed >= 1000 ? 0 : 1000));
+        })
+        .catch(() => {
+          $timeout(() => {
+            notificationService.error({
+              title: 'Error connecting',
+              message: 'Error connecting to your database. Verify your connection settings are correct.'
+                // message: err
+            });
+          });
+        })
+        .finally(() => {
+          var ellapsed = (performance.now() - startTime).toFixed(5);
+
+          $timeout(() => {
+            activeConnection.connecting = false;
+          }, (ellapsed >= 1000 ? 0 : 1000));
+        });
     };
 
     function _listConnections() {
@@ -76,7 +115,7 @@ angular.module('app').controller('listConnectionsCtrl', [
         })
         .catch((response) => {
           $timeout(() => {
-            $log.error(response);
+            logger.error(response);
           });
         })
         .finally(() => {

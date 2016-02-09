@@ -2,8 +2,7 @@
 
 angular.module('app').service('modalService', [
   '$uibModal',
-  '$uibModalStack',
-  function($uibModal, $uibModalStack) {
+  '$uibModalStack', ($uibModal, $uibModalStack) => {
     const Promise = require('bluebird');
 
     function ModalService() {}
@@ -44,16 +43,13 @@ angular.module('app').service('modalService', [
       });
     };
 
-    ModalService.prototype.openQueryResultsExport = function openQueryResultsExport(collection, query) {
+    ModalService.prototype.openQueryResultsExport = function openQueryResultsExport(query) {
       return openModal({
         templateUrl: __dirname + '/components/queryResultsExportModal/queryResultsExportModal.html',
         controller: 'queryResultsExportModalCtrl',
         resolve: {
-          query: [function() {
+          query: [() => {
             return query;
-          }],
-          collection: [function() {
-            return collection;
           }]
         },
         size: 'lg'
@@ -87,19 +83,49 @@ angular.module('app').service('modalService', [
       });
     };
 
-    ModalService.prototype.openDeleteResult = function openDeleteResult(result, collection) {
+    ModalService.prototype.openDeleteDocument = function openDeleteDocument(doc, collection) {
+      if (!doc) throw new Error('modalService - openDeleteDocument() - doc is required');
+      if (!collection) throw new Error('modalService - openDeleteDocument() - collection is required');
+
       var _this = this;
 
       return new Promise((resolve, reject) => {
         _this.confirm({
-          message: 'Are you sure you want to delete this document?',
-          confirmButtonMessage: 'Yes',
-          cancelButtonMessage: 'No'
-        }).result.then(function() {
-          collection.deleteById(result._id)
-            .then(resolve)
-            .catch(reject);
-        });
+            message: 'Are you sure you want to delete this document?',
+            confirmButtonMessage: 'Yes',
+            cancelButtonMessage: 'No'
+          }).result.then(() => {
+            collection.deleteById(doc._id)
+              .then(resolve)
+              .catch(reject);
+          })
+          .catch(err => {
+            if (err === 'cancel' || err === 'escape key press') return reject(null); //eat the cancel button "error" and esc keypress
+            return reject(err);
+          });
+      });
+    };
+
+    ModalService.prototype.openEditDocument = function openEditDocument(doc, collection) {
+      if (!doc) throw new Error('modalService - openEditDocument() - doc is required');
+      if (!collection) throw new Error('modalService - openDeleteDocument() - collection is required');
+
+      return new Promise((resolve, reject) => {
+        openModal({
+            templateUrl: __dirname + '/components/editDocument/editDocument.html',
+            controller: 'editDocumentCtrl',
+            resolve: {
+              doc: () => {
+                return doc;
+              }
+            },
+            size: 'lg'
+          }).result.then((updates) => {
+            collection.updateById(doc._id, updates)
+              .then(resolve)
+              .catch(reject);
+          })
+          .catch(reject);
       });
     };
 

@@ -11,17 +11,14 @@ const Connection = require('lib/entities/connection');
 
 const DB_CONNECTIONS = appConfig.dbConfigPath;
 
-/**
- * @class ConnectionRepository
- */
+/** @module Connection */
+/** @class */
 class ConnectionRepository {
-  /**
-   * @constructor ConnectionRepository
-   */
   constructor() {}
 
   /**
-   * @method findById
+   * Find a connection by id
+   * @param {string} id - Id of the connection to find
    */
   findById(id) {
     let _this = this;
@@ -39,7 +36,16 @@ class ConnectionRepository {
   }
 
   /**
-   * @method create
+   * Create a new connection
+   * @param {object} options
+   * @param {string} options.name - Connection name
+   * @param {string} options.host - Connection host
+   * @param {string} options.port - Connection port
+   * @param {string} [options.databaseName] - Database name
+   * @param {object} [options.replicaSet] - Replica set config
+   * @param {string} options.replicaSet.name - Replica set name
+   * @param {array<object>} options.replicaSet.servers - Replica set servers
+   * @param {object} [options.auth]
    */
   create(options) {
     let _this = this;
@@ -74,46 +80,53 @@ class ConnectionRepository {
   }
 
   /**
-   * @method list
+   * List all connections
    */
   list() {
     return getConnectionInstances();
   }
 
   /**
-   * @method update
-   * @param {String} id - id of the connection to update
+   * Update a connection by id
+   * @param {string} id - id of the connection to update
+   * @param {object} updates - hash of updates to apply to the connection
+   * @param {string} [updates.name] - connection name
+   * @param {string} [updates.host] - Connection host
+   * @param {string} [updates.port ]- Connection port
+   * @param {string} [updates.databaseName] - Database name
+   * @param {object} [updates.replicaSet] - Replica set config
+   * @param {string} [updates.replicaSet.name] - Replica set name
+   * @param {array<object>} [updates.replicaSet.servers] - Replica set servers
+   * @param {object} [updates.auth]
    */
-  update(id, options) {
-    var _this = this;
+  update(id, updatedConnection) {
+    let _this = this;
+    let connections;
 
     return new Promise((resolve, reject) => {
       if (!id) return reject(new errors.InvalidArugmentError('id is required'));
-      if (!options) return reject(new errors.InvalidArugmentError('options is required'));
-
-      var connection;
+      if (!updatedConnection) return reject(new errors.InvalidArugmentError('updatedConnection is required'));
 
       return _this.list()
-        .then((connections) => {
-          return findConnectionById(id, connections)
-            .then(function(_connection) {
-              connection = _connection;
-
-              return updateConnection(_connection, options, connections);
-            });
+        .then((_connections) => {
+          connections = _connections;
+          return findConnectionById(id, connections);
+        })
+        .then((connection) => {
+          return updateConnection(connection, updatedConnection, connections);
         })
         .then(convertConnectionInstancesIntoConfig)
         .then(writeConfigFile)
         .then(() => {
-          return resolve(connection);
+          return resolve(updatedConnection);
         })
         .catch(reject);
     });
   }
 
   /**
-   * @method delete
-   * @param {String} id - id of the connection to delete
+   * Delete a connection by id
+   * @param {string} id - id of the connection to delete
    */
   delete(id) {
     var _this = this;
@@ -138,7 +151,7 @@ class ConnectionRepository {
   }
 
   /**
-   * @method existsByName
+   * Check if a connection exists by name
    * @param {String} name
    */
   existsByName(name) {
@@ -178,7 +191,8 @@ function generateConnectionInstanceFromConfig(connectionConfig) {
     id: connectionConfig.id || uuid.v4(),
     name: connectionConfig.name,
     host: connectionConfig.host,
-    port: connectionConfig.port
+    port: connectionConfig.port,
+    replicaSet: connectionConfig.replicaSet
   });
 
   _.each(connectionConfig.databases, (databaseConfig) => {
@@ -196,7 +210,8 @@ function generateConnectionInstanceFromConfig(connectionConfig) {
 
 function convertConnectionInstancesIntoConfig(connections) {
   return new Promise((resolve) => {
-    return resolve(connections.map(convertConnectionInstanceIntoConfig));
+    let configs = connections.map(convertConnectionInstanceIntoConfig);
+    return resolve(configs);
   });
 }
 
@@ -207,19 +222,20 @@ function convertConnectionInstanceIntoConfig(connection) {
   //until I change to storing these in something that assigns ids
   //we have to manually add them
 
-  return {
+  let config = {
     id: connection.id || uuid.v4(),
     name: connection.name,
     host: connection.host,
     port: connection.port,
+    replicaSet: connection.replicaSet,
     databases: connection.databases ? connection.databases.map((database) => {
       var db = {
+        id: database.id || uuid.v4(),
         name: database.name
       };
 
       if (database.auth) {
         db.auth = {
-          id: database.id || uuid.v4(),
           username: database.auth.username,
           password: database.auth.password
         };
@@ -228,6 +244,8 @@ function convertConnectionInstanceIntoConfig(connection) {
       return db;
     }) : []
   };
+
+  return config;
 }
 
 function findConnectionById(connectionId, connections) {
@@ -248,16 +266,6 @@ function createConnection(options) {
   return new Promise((resolve) => {
     var newConn = new Connection(options);
 
-    if (options.databaseName) {
-      newConn.addDatabase({
-        id: uuid.v4(),
-        name: options.databaseName,
-        host: options.host,
-        port: options.port,
-        auth: options.auth
-      });
-    }
-
     return resolve(newConn);
   });
 }
@@ -271,15 +279,15 @@ function removeConnection(connection, connections) {
   });
 }
 
-function updateConnection(connection, options, connections) {
+function updateConnection(originalConnection, updatedConnection, connections) {
   return new Promise((resolve) => {
-    connection = _.extend(connection, options);
+    // connection = _.extend(connection, options);
+    let index = connections.indexOf(originalConnection);
+
+    connections.splice(index, 1, updatedConnection);
 
     return resolve(connections);
   });
 }
 
-/**
- * @exports
- */
 module.exports = new ConnectionRepository();

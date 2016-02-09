@@ -69,8 +69,6 @@ describe('utils', function() {
 
           var result = keyValueUtils.convert(value);
 
-          console.log(result);
-
           should.exist(result);
           should(result.original).equal(value);
           should.exist(result.keyValues);
@@ -110,22 +108,6 @@ describe('utils', function() {
           result.keyValues.length.should.equal(_.keys(value).length);
 
           result.keyValues[0].key.should.equal('key1');
-
-          console.log('result', result);
-          console.log('---------------');
-          console.log(result.keyValues[0]);
-          // console.log(result.keyValues[0].value);
-
-          // result.keyValues[0].value.should.equal(value.key1);
-          // result.keyValues[0].type.should.equal('object');
-          // result.keyValues[0].icon.should.equal(keyValueUtils.getPropertyTypeIcon('object'));
-          //
-          // should.exist(result.keyValues[0].value.keyValues);
-          //
-          // result.keyValues[0].value.keyValues[0].key.should.equal('key1');
-          // result.keyValues[0].value.keyValues[0].value.should.equal(value.key1);
-          // result.keyValues[0].value.keyValues[0].type.should.equal('string');
-          // result.keyValues[0].value.keyValues[0].icon.should.equal(keyValueUtils.getPropertyTypeIcon('string'));
 
           return next(null);
         });

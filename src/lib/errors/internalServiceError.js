@@ -1,21 +1,13 @@
-/* ------------------------------------------------
- * Dependencies
- * ------------------------------------------------ */
-const util = require('util');
+'use strict';
 
 const AbstractError = require('./abstractError');
 
-/*
- * @constructor InternalServiceError
- */
-var InternalServiceError = function() {
-  AbstractError.apply(this, arguments);
-};
-util.inherits(InternalServiceError, AbstractError);
-InternalServiceError.prototype.name = 'Internal Service Error';
+/** @class */
+class InternalServiceError extends AbstractError {
+  constructor(message) {
+    super(message);
+    this.name = 'Internal Service Error';
+  }
+}
 
-/*
- * @exports
- *
- */
 module.exports = InternalServiceError;

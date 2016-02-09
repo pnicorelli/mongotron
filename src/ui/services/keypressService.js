@@ -3,31 +3,30 @@
 angular.module('app').factory('keypressService', [
   '$window',
   '$rootScope',
-  '$log',
-  '$timeout',
-  function($window, $rootScope, $log, $timeout) {
+  '$timeout', ($window, $rootScope, $timeout) => {
     const keybindings = require('lib/modules/keybindings');
+    const logger = require('lib/modules/logger');
 
     function KeypressService() {
-      var _this = this;
+      let _this = this;
       _this.registeredCombos = {};
       _this.registeredCommandHandlers = {};
       _this.listener = new $window.keypress.Listener();
       _this.keybindingContext = null;
 
       keybindings.list()
-        .then(function(keybindings) {
-          $timeout(function() {
-            var keybindingGroups = _.groupBy(keybindings, 'keystroke');
+        .then((keybindings) => {
+          $timeout(() => {
+            let keybindingGroups = _.groupBy(keybindings, 'keystroke');
 
             for (let key in keybindingGroups) {
-              var bindings = keybindingGroups[key];
+              let bindings = keybindingGroups[key];
 
-              _.each(bindings, function(binding) {
-                var commandHandler = _this.registeredCommandHandlers[binding.command];
+              _.each(bindings, (binding) => {
+                let commandHandler = _this.registeredCommandHandlers[binding.command];
 
                 if (!commandHandler) {
-                  $log.warn('KeypressService - constructor - no command handler registered for command : ' + binding.command);
+                  logger.warn('KeypressService - constructor - no command handler registered for command : ' + binding.command);
                 } else {
                   _this.registerCombo(key, binding.context, commandHandler);
                 }
@@ -35,20 +34,20 @@ angular.module('app').factory('keypressService', [
             }
           });
         })
-        .catch(function(err) {
-          $timeout(function() {
-            $log.error(err);
+        .catch((err) => {
+          $timeout(() => {
+            logger.error(err);
           });
         });
     }
 
     KeypressService.prototype.isRegistered = function isRegistered(combo) {
-      var registration = this.registeredCombos[combo];
+      let registration = this.registeredCombos[combo];
       return registration ? true : false;
     };
 
     KeypressService.prototype.registerCombo = function registerCombo(combo, context, callback) {
-      var _this = this;
+      let _this = this;
 
       if (!combo || !context || !callback || !_.isFunction(callback)) return;
 
@@ -56,27 +55,27 @@ angular.module('app').factory('keypressService', [
       //you can have multiple registrations per combo, as long as the contexts are different
       //since we should only ever fire one handler for any given context
 
-      //if the callback is already registered just add the listener
+      //if the combo is already registered just add the listener
       if (_this.isRegistered(combo)) {
-        var registeredCallback = _.findWhere(_this.registeredCombos[combo], {
+        let registeredCallback = _.findWhere(_this.registeredCombos[combo], {
           context: _this.keybindingContext
         });
 
         if (registeredCallback) {
-          throw new Error('registerCombo - combo has already been registered for the give context - can only have 1 callback per key combo');
+          throw new Error('registerCombo - combo has already been registered for the given context - can only have 1 callback per key combo');
         } else {
-          var callbacks = _this.registeredCombos[combo];
+          let callbacks = _this.registeredCombos[combo];
           callbacks.push(callback);
         }
       }
-      //otherwise register the combo with a wrapper that will fire any register callbacks that match
+      //otherwise register the combo with a wrapper that will fire any registered callbacks that match
       //the current keybindingContext
       else {
-        var callbackWrapper = () => {
-          var args = Array.prototype.slice.call(arguments);
+        let callbackWrapper = () => {
+          let args = Array.prototype.slice.call(arguments);
 
-          var callbacks = _this.registeredCombos[combo];
-          var registeredCallbacks = _.filter(callbacks, (callback) => {
+          let callbacks = _this.registeredCombos[combo];
+          let registeredCallbacks = _.filter(callbacks, (callback) => {
             return callback.context === _this.keybindingContext || callback.context === 'global';
           });
 
@@ -93,7 +92,7 @@ angular.module('app').factory('keypressService', [
           callback: callback
         }];
 
-        $log.debug('Registering keypress combo : ' + combo);
+        logger.info('Registering keypress combo : ' + combo);
 
         _this.listener.counting_combo(convertCommand(combo), callbackWrapper, true); // jshint ignore:line
       }
@@ -104,7 +103,7 @@ angular.module('app').factory('keypressService', [
     };
 
     KeypressService.prototype.unregisterAllCombos = function unregisterAllCombos() {
-      var _this = this;
+      let _this = this;
 
       _.each(_this.registeredCombos, (combo) => {
         _this.listener.unregister_combo(combo); // jshint ignore:line
@@ -114,7 +113,7 @@ angular.module('app').factory('keypressService', [
     KeypressService.prototype.changeCurrentContext = function changeCurrentContext(context) {
       if (!context) return;
 
-      $log.debug('keybinding context changed', context);
+      logger.info('keybinding context changed', context);
 
       this.keybindingContext = context;
     };
@@ -122,7 +121,7 @@ angular.module('app').factory('keypressService', [
     KeypressService.prototype.registerCommandHandler = function registerCommandHandler(command, callback) {
       if (!command || !callback) return;
 
-      var _this = this;
+      let _this = this;
 
       if (_this.registeredCommandHandlers[command]) throw new Error('registerCommandHandler - command \'' + command + '\' is already registerd');
 
@@ -130,7 +129,6 @@ angular.module('app').factory('keypressService', [
     };
 
     function convertCommand(command) {
-
       command = command.replace(/cmd/g, 'meta');
       command = command.replace(/-/g, ' ');
 
@@ -143,8 +141,7 @@ angular.module('app').factory('keypressService', [
 
 angular.module('app').run([
   '$rootScope',
-  'keypressService',
-  function($rootScope, keypressService) {
+  'keypressService', ($rootScope, keypressService) => {
     $rootScope.$on('$destroy', () => {
       keypressService.unregisterAllCombos();
     });

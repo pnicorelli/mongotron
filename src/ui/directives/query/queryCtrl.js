@@ -5,26 +5,31 @@ angular.module('app').controller('queryCtrl', [
   '$rootScope',
   'notificationService',
   'modalService',
-  function($scope, $rootScope, notificationService, modalService) {
-    const queryModule = require('lib/modules/query');
-    const keyValueUtils = require('src/lib/utils/keyValueUtils');
+  '$timeout', ($scope, $rootScope, notificationService, modalService, $timeout) => {
+    const expression = require('lib/modules/expression');
 
     if (!$scope.database) throw new Error('database is required for database query directive');
     if (!$scope.database.collections || !$scope.database.collections.length) throw new Error('database must have collections for database query directive');
 
     $scope.loading = false;
     $scope.queryTime = null;
+
+    $scope.serverName = `${$scope.database.host}:${$scope.database.port}`;
+    $scope.databaseName = $scope.database.name;
+
+    //editor
     $scope.editorHandle = {};
     $scope.codeEditorOptions = {};
     $scope.codeEditorCustomData = {
       collectionNames: _.pluck($scope.database.collections, 'name')
     };
+    $scope.editorHasFocus = false;
 
-    $scope.currentQuery = null;
     $scope.results = [];
     $scope.keyValueResults = [];
 
-    $scope.deleteResult = _deleteResult;
+    $scope.deleteDocument = _deleteDocument;
+    $scope.editDocument = _editDocument;
 
     let defaultCollection = $scope.defaultCollection ? _.findWhere($scope.database.collections, {
       name: $scope.defaultCollection
@@ -32,21 +37,24 @@ angular.module('app').controller('queryCtrl', [
 
     defaultCollection = defaultCollection || $scope.database.collections[0];
 
-    let defaultQuery = 'db.' + defaultCollection.name.toLowerCase() + '.find({\n  \n})';
+    //check for bracket notation
+    let expressionCollectionName = defaultCollection.name.indexOf('.') > 0 ? `['${defaultCollection.name}']` : `.${defaultCollection.name}`;
 
-    $scope.changeTabName = function(name) {
+    let defaultExpression = `db${expressionCollectionName}.find({\n  \n})`;
+
+    $scope.changeTabName = (name) => {
       if (!name || !$scope.databaseTab) return;
-      $scope.databaseTab.name = name.length > 20 ? (name.substring(0, 20) + '...') : name;
+      $scope.databaseTab.name = name.length > 20 ? `${name.substring(0, 20)}...` : name;
     };
 
-    $scope.changeTabName(defaultQuery);
+    $scope.changeTabName(defaultExpression);
 
     $scope.form = {
-      query: defaultQuery
+      expression: defaultExpression
     };
 
-    $scope.runQuery = function() {
-      _runQuery($scope.form.query);
+    $scope.evaluateExpression = () => {
+      _evalExpression($scope.form.expression);
     };
 
     $scope.VIEWS = {
@@ -56,22 +64,20 @@ angular.module('app').controller('queryCtrl', [
     };
     $scope.currentView = $scope.VIEWS.KEYVALUE;
 
-    _runQuery(defaultQuery);
+    _evalExpression(defaultExpression);
 
-    $scope.autoformat = function() {
+    $scope.autoformat = () => {
       if ($scope.editorHandle.autoformat) {
         $scope.editorHandle.autoformat();
       }
     };
 
-    $scope.editorHasFocus = false;
-
-    $scope.$watch('editorHasFocus', function(val) {
+    $scope.$watch('editorHasFocus', (val) => {
       if (val) {
         //make some functions available on the root scope when the editor gets focus,
         //used for keybindings
         $rootScope.currentQuery = {
-          runQuery: $scope.runQuery,
+          runQuery: $scope.evaluateExpression,
           autoformat: $scope.autoformat
         };
       } else {
@@ -79,85 +85,83 @@ angular.module('app').controller('queryCtrl', [
       }
     });
 
-    $scope.exportResults = function() {
-      modalService.openQueryResultsExport($scope.currentCollection, $scope.currentQuery);
+    $scope.exportResults = () => {
+      modalService.openQueryResultsExport($scope.form.expression);
     };
 
-    function _runQuery(rawQuery) {
+    $scope.collapseAll = () => {
+      $scope.$broadcast('collapse');
+    };
+
+    function _evalExpression(rawExpression) {
       $scope.loading = true;
       $scope.error = null;
 
-      $scope.changeTabName(rawQuery);
+      $scope.changeTabName(rawExpression);
 
-      if (!queryModule.isValidQuery(rawQuery)) {
-        $scope.error = 'Sorry, ' + rawQuery + ' is not a valid query';
-        $scope.loading = false;
-        return;
-      }
+      let evalScope = _createEvalScopeFromCollections($scope.database.collections);
 
-      let collectionName = queryModule.parseCollectionName(rawQuery);
-
-      let collection = _getCollectionByNameFromRawQuery(collectionName);
-
-      if (!collection) {
-        $scope.error = 'Sorry, ' + collectionName + ' is not a valid collection name';
-        $scope.loading = false;
-        return;
-      }
-
-      $scope.currentCollection = collection;
-
-      let query;
-
-      queryModule.createQuery(rawQuery)
-        .then((_query) => {
-          query = _query;
-
-          return collection.execQuery(query);
-        })
-        .then((result) => {
+      expression.eval(rawExpression, evalScope)
+        .then(expressionResult => {
           $scope.$apply(() => {
-            $scope.currentQuery = query;
-            $scope.loading = false;
-            $scope.queryTime = result.time;
-            $scope.results = result.result;
+            $scope.result = expressionResult.result;
+            $scope.resultMongoMethodName = expressionResult.mongoMethodName;
+            $scope.queryTime = expressionResult.time;
+            $scope.keyValueResults = expressionResult.keyValueResults;
 
-            if ($scope.results && _.isArray($scope.results)) {
-              $scope.keyValueResults = keyValueUtils.convert($scope.results);
-            }
+            if (expressionResult.mongoCollectionName && expressionResult.mongoMethodName !== 'count') {
+              $scope.currentCollection = _.findWhere($scope.database.collections, {
+                name: expressionResult.mongoCollectionName
+              });
 
-            if ($scope.currentQuery.mongoMethod === 'count') {
+              if (_isModifyingMongoMethod(expressionResult.mongoMethodName)) {
+                notificationService.success(`${expressionResult.mongoMethodName} was successful`);
+
+                return _evalExpression(`db.${expressionResult.mongoCollectionName}.find()`, $scope.database.collections);
+              }
+            } else {
               $scope.currentView = $scope.VIEWS.RAW;
-            } else if ($scope.currentView === $scope.VIEWS.RAW) {
-              $scope.currentView = $scope.VIEWS.KEYVALUE;
-            }
-
-            if ($scope.currentQuery.mongoMethod !== 'find' &&
-              $scope.currentQuery.mongoMethod !== 'aggregate' &&
-              $scope.currentQuery.mongoMethod !== 'count') {
-              notificationService.success($scope.currentQuery.mongoMethod + ' was successful');
-
-              _runQuery('db.' + $scope.currentCollection.name + '.find()');
             }
           });
         })
         .catch((error) => {
           $scope.$apply(() => {
-            $scope.error = error && error.message ? error.message : error;
+            $scope.error = error && error.message ? `Error : ${error.message}` : error;
+            $scope.loading = false;
+          });
+        })
+        .finally(() => {
+          $timeout(() => {
             $scope.loading = false;
           });
         });
     }
 
-    function _deleteResult(result) {
-      if (!result) return;
+    function _createEvalScopeFromCollections(collections) {
+      let evalScope = {
+        db: {}
+      };
 
-      modalService.openDeleteResult(result, $scope.currentCollection)
+      collections.forEach(collection => {
+        evalScope.db[collection.name] = collection;
+      });
+
+      return evalScope;
+    }
+
+    function _isModifyingMongoMethod(methodName) {
+      return methodName && (methodName === 'updateMany' || methodName === 'updateById' || methodName === 'updateOne' || methodName === 'deleteMany' || methodName === 'deleteById' || methodName === 'deleteOne');
+    }
+
+    function _deleteDocument(doc) {
+      if (!doc) return;
+
+      modalService.openDeleteDocument(doc, $scope.currentCollection)
         .then(() => {
           $scope.$apply(() => {
             notificationService.success('Delete successful');
 
-            _runQuery('db.' + $scope.currentCollection.name + '.find()');
+            _evalExpression(`db.${$scope.currentCollection.name}.find()`);
           });
         })
         .catch((error) => {
@@ -168,12 +172,26 @@ angular.module('app').controller('queryCtrl', [
         });
     }
 
-    function _getCollectionByNameFromRawQuery(collectionName) {
-      if (!collectionName) return null;
+    function _editDocument(doc) {
+      if (!doc) return;
 
-      return _.find($scope.database.collections, function(collection) {
-        return collection.name && collection.name.toLowerCase && collection.name.toLowerCase() === collectionName.toLowerCase() ? true : false;
-      });
+      modalService.openEditDocument(doc, $scope.currentCollection)
+        .then(() => {
+          $scope.$apply(() => {
+            notificationService.success('Update successful');
+
+            _evalExpression(`db.${$scope.currentCollection.name}.find()`);
+          });
+        })
+        .catch((error) => {
+          $scope.$apply(() => {
+            let errMsg = error && error.message ? error.message : error;
+            if (errMsg !== 'backdrop click' && errMsg !== 'escape key press') {
+              $scope.error = errMsg;
+            }
+            $scope.loading = false;
+          });
+        });
     }
   }
 ]);
